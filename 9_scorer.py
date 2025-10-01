@@ -11,7 +11,7 @@ from pandas.api.types import is_string_dtype
 # Sabitler ve Ağırlıklar
 # ===============================
 INPUT_CSV  = "CAR_DATA_FINAL_3.csv"
-OUTPUT_CSV = "CAR_DATA_FINAL_SC.csv"
+OUTPUT_CSV = "CAR_DATA_FINAL_4_SC.csv"
 
 BASE_MAINT = 100.0
 HP_COEFF   = 0.4
