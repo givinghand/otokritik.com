@@ -26,7 +26,7 @@ FUEL_FACTORS = {
 }
 
 TRANS_FACTORS = {
-    "otomatik": 1.2,
+    "otomatik": 1.3,
     "manuel": 1.0,
     "redükt": 0.0,
     "redukt": 0.0,
@@ -296,8 +296,8 @@ def compute_eko_score(df, maint_score):
 
         comp = (cons_s  * 0.20 +
                 mtv_s   * 0.15 +
-                jant_s  * 0.10 +
-                maint_s * 0.55)
+                jant_s  * 0.15 +
+                maint_s * 0.50)
 
         had_any_raw = (pd.to_numeric(consumption, errors="coerce").notna() |
                        pd.to_numeric(mtv, errors="coerce").notna() |
