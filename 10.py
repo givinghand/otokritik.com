@@ -1,22 +1,179 @@
+
+from pathlib import Path
+import pandas as pd
+import unicodedata
+import re
+
+# ---------- CONFIG (fixed filenames) ----------
+INPUT_CSV = "CAR_DATA_FINAL_4_SC.csv"
+OUTPUT_CSV = "CAR_DATA_FINAL_5.csv"
+ENCODING = "utf-8-sig"
+
+# Transliteration map (Turkish -> ASCII)
+_TRANSLIT_MAP = {
+    "ç": "c", "Ç": "C",
+    "ğ": "g", "Ğ": "G",
+    "ı": "i", "İ": "I",
+    "ö": "o", "Ö": "O",
+    "ş": "s", "Ş": "S",
+    "ü": "u", "Ü": "U",
+    "â": "a", "Â": "A",
+    "î": "i", "Î": "I",
+    "û": "u", "Û": "U",
+}
+_TRANSLIT_TABLE = str.maketrans(_TRANSLIT_MAP)
+
+def detect_delimiter(path: Path, sample_lines: int = 8) -> str:
+    """Heuristic: read first few non-empty lines and choose ';' if more semicolons, else comma."""
+    sem, com = 0, 0
+    with path.open("r", encoding=ENCODING, errors="ignore") as f:
+        for _ in range(sample_lines):
+            line = f.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line == "":
+                continue
+            sem += line.count(";")
+            com += line.count(",")
+    # prefer semicolon if equal or greater
+    return ";" if sem >= com else ","
+
+def transliterate_text(x: str) -> str:
+    """Transliterate Turkish chars in a single string, preserve other characters."""
+    if pd.isna(x):
+        return x
+    s = str(x)
+    # first try to fix common mojibake issues: re-decode if looks like mojibake
+    if any(ch in s for ch in ("Ã", "Â", "Ä")):
+        try:
+            s2 = s.encode("latin1").decode("utf-8")
+            # if result looks more ascii-like, use it
+            if re.search(r"[A-Za-zİŞŞĞÇÖÜıığçöü]", s2):
+                s = s2
+        except Exception:
+            pass
+    # normalize and remove combining diacritics
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    # translate Turkish characters using table (covers uppercase too)
+    s = s.translate(_TRANSLIT_TABLE)
+    return s
+
+def transliterate_dataframe(df: pd.DataFrame, transliterate_column_names: bool = True):
+    """Transliterate column names and all object/string columns. Returns new df and stats."""
+    df_out = df.copy(deep=True)
+    colname_changes = {}
+    if transliterate_column_names:
+        new_cols = []
+        for c in df_out.columns:
+            c_new = transliterate_text(c)
+            if c_new != c:
+                colname_changes[c] = c_new
+            new_cols.append(c_new)
+        df_out.columns = new_cols
+
+    replacements = 0
+    per_col = {}
+    # choose columns to transliterate: all object/string columns
+    for col in df_out.columns:
+        # skip numeric columns (but we read everything as str - check dtype)
+        # we still transliterate only if a string-like column (object) or arbitrary (we read as str)
+        series = df_out[col].astype(object)
+        changed = 0
+        # apply transliteration elementwise but keep NaN as-is
+        def _apply_val(v):
+            nonlocal changed
+            if pd.isna(v):
+                return v
+            s = str(v)
+            s2 = transliterate_text(s)
+            if s2 != s:
+                changed += 1
+            return s2
+        df_out[col] = series.map(_apply_val)
+        if changed:
+            replacements += changed
+            per_col[col] = changed
+
+    stats = {"total_replacements": replacements, "per_col": per_col, "colname_changes": colname_changes}
+    return df_out, stats
+
+def main():
+    p = Path(INPUT_CSV)
+    if not p.exists():
+        print(f"ERROR: input file not found: {p}")
+        return
+
+    delim = detect_delimiter(p)
+    print(f"Detected delimiter: {repr(delim)}")
+
+    # read everything as strings to preserve content exactly
+    df = pd.read_csv(p, sep=delim, dtype=str, encoding=ENCODING, keep_default_na=False, na_values=["", "NaN", "nan"])
+    print(f"Read CSV: rows={len(df)}, cols={len(df.columns)}")
+
+    df_fixed, stats = transliterate_dataframe(df, transliterate_column_names=True)
+
+    print("Column name changes:", stats["colname_changes"] if stats["colname_changes"] else "none")
+    print("Value replacements total:", stats["total_replacements"])
+    if stats["per_col"]:
+        print("Per-column replacements (sample):")
+        for k, v in list(stats["per_col"].items())[:10]:
+            print(f"  {k}: {v}")
+
+    # write output using the same delimiter as detected
+    df_fixed.to_csv(OUTPUT_CSV, sep=delim, index=False, encoding=ENCODING)
+    print(f"Wrote: {OUTPUT_CSV} (rows={len(df_fixed)}, cols={len(df_fixed.columns)})")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+
+#################################################################################
+#################################################################################
+#################################################################################
+
+
+
+
+
+
+
+
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-rename_reorder_car_data.py
+rename_reorder_car_data_fixed.py
 
-Reads CAR_DATA_SCORED.csv, renames & reorders columns according to the provided mapping
-and writes CAR_DATA.csv. Cell contents are preserved exactly (no dtype conversion).
+Fixed version of the renaming & reordering script.
 
-If you want extras from the original file appended to the end, set APPEND_EXTRAS = True.
+Improvements / fixes:
+ - Auto-detects delimiter (prefers ';' if present otherwise ',').
+ - Robust header matching: case-insensitive, strips whitespace and normalizes
+   Turkish characters / punctuation so mapping keys match even if slightly different.
+ - Preserves all data rows (no accidental dropping).
+ - Prints summary: original rows/cols, written rows/cols and missing mapping keys.
+ - Keeps cell contents exactly as read (no dtype conversion).
 """
 
+from pathlib import Path
 import csv
 import re
 from collections import OrderedDict
-from pathlib import Path
 
 # ---------- CONFIG ----------
 INPUT_CSV = "CAR_DATA_FINAL_4_SC.csv"
 OUTPUT_CSV = "CAR_DATA_FINAL_5.csv"
 APPEND_EXTRAS = False  # set True if you want columns not in mapping appended to output
+ENCODING = "utf-8-sig"
 
 # ---------- MAPPING (original_name -> new_name) ----------
 MAPPING = OrderedDict([
@@ -118,20 +275,32 @@ MAPPING = OrderedDict([
 
 # -------------------------------------------------------------------------
 
-def normalize(s: str) -> str:
-    if s is None:
+def detect_delimiter(sample_line: str):
+    """
+    Choose delimiter heuristically using first non-empty line.
+    Prefer ';' if appears more often than ',' otherwise use ','.
+    """
+    if sample_line is None:
+        return ';'
+    # count occurrences (ignore commas within quotes — but this is a heuristic)
+    sc = sample_line.count(';')
+    cc = sample_line.count(',')
+    return ';' if sc >= cc else ','
+
+# normalize string for matching (strip, lower, remove diacritics & non-alnum)
+def normalize(colname: str) -> str:
+    if colname is None:
         return ""
-    s = s.lower()
-    # turkce karakter donusumu (basit)
-    trans = str.maketrans(
-        "iğusocIĞUSOC",
-        "igusocigusoc",
-    )
-    s = s.translate(trans)
-    # remove non-alphanumeric
+    s = str(colname).strip().lower()
+    # replace turkish characters with ascii equivalents
+    trans = str.maketrans("çğıöşüÇĞİÖŞÜâîûÂÎÛ", "cgiosuCGIOSUa iuAIU".replace(" ", ""))  # simple
+    # safer approach: remove diacritics
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    # keep only alnum
     s = re.sub(r'[^a-z0-9]', '', s)
     return s
-
 
 def build_index_map(header):
     """Return dict: normalized_name -> (index, original_name)"""
@@ -140,24 +309,32 @@ def build_index_map(header):
         idx_map[normalize(h)] = (i, h)
     return idx_map
 
-
 def main():
     inp = Path(INPUT_CSV)
     outp = Path(OUTPUT_CSV)
-
     if not inp.exists():
-        print(f"Hata: input dosyasi bulunamadi: {inp}")
+        print(f"Error: input file not found: {inp}")
         return
 
-    with inp.open("r", encoding="utf-8", newline='') as f_in:
-        reader = csv.reader(f_in, delimiter=';')
+    # read first non-empty line to choose delimiter
+    with inp.open("r", encoding=ENCODING, newline='') as f:
+        first_line = ""
+        for _ in range(10):
+            first_line = f.readline()
+            if first_line:
+                break
+    delimiter = detect_delimiter(first_line)
+    # reopen to read properly
+    with inp.open("r", encoding=ENCODING, newline='') as f_in:
+        reader = csv.reader(f_in, delimiter=delimiter)
         try:
             original_header = next(reader)
         except StopIteration:
-            print("Hata: input CSV bos.")
+            print("Error: input CSV is empty.")
             return
         original_header = [h.strip() for h in original_header]
 
+        # build normalized index map
         idx_map = build_index_map(original_header)
 
         pick_indices = []   # each element: index in original header or None
@@ -167,11 +344,12 @@ def main():
 
         for orig_key, new_name in MAPPING.items():
             matched_idx = None
-            # exact
+            # prefer exact match (case-sensitive after stripping)
             if orig_key in original_header:
                 matched_idx = original_header.index(orig_key)
-                used_original_cols.add(orig_key)
+                used_original_cols.add(original_header[matched_idx])
             else:
+                # try normalized match
                 nkey = normalize(orig_key)
                 if nkey in idx_map:
                     matched_idx = idx_map[nkey][0]
@@ -184,23 +362,28 @@ def main():
             if matched_idx is None:
                 missing_keys.append(orig_key)
 
+        # extras are original columns not matched (preserve order)
         extras = [c for c in original_header if c not in used_original_cols]
+
         final_header = list(new_header)
         if APPEND_EXTRAS:
             final_header.extend(extras)
 
-    # write output preserving cell content exactly
-    with inp.open("r", encoding="utf-8", newline='') as f_in, outp.open("w", encoding="utf-8", newline='') as f_out:
-        reader = csv.reader(f_in, delimiter=';')
-        writer = csv.writer(f_out, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        # Now read all rows and write output
+    # Re-open input and output and do actual row processing (so header detection and data reading consistent)
+    with inp.open("r", encoding=ENCODING, newline='') as f_in, outp.open("w", encoding=ENCODING, newline='') as f_out:
+        reader = csv.reader(f_in, delimiter=delimiter)
+        writer = csv.writer(f_out, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
 
-        # skip original header
-        next(reader)
+        original_header = next(reader)  # we've already read once above but reopen ensures same pointer
+        original_header = [h.strip() for h in original_header]
 
         # write new header
         writer.writerow(final_header)
 
+        row_count = 0
         for row in reader:
+            # preserve row even if shorter/longer than header
             out_row = []
             for idx in pick_indices:
                 if idx is None:
@@ -212,239 +395,31 @@ def main():
                     e_idx = original_header.index(e)
                     out_row.append(row[e_idx] if e_idx < len(row) else "")
             writer.writerow(out_row)
+            row_count += 1
 
-    # report
-    print(f"Cikti yazildi: {outp}")
+    # summary
+    # number of columns in output
+    out_cols = len(final_header)
+    print(f"Output written: {outp!s}")
     if missing_keys:
-        print("\nAsağidaki mapping anahtarlari input CSV'de bulunamadi ve ciktita bos sutun olarak yer alacak:")
+        print("\nThe following mapping keys were NOT found in input header (these will be empty columns in output):")
         for k in missing_keys:
             print(" -", k)
     if extras:
-        print("\nInput CSV icinde ama mapping'te olmayan ekstra sutunlar:")
+        print("\nInput CSV contains extra columns not in mapping:")
         for e in extras:
-            print(" -", e, ("(eklendi)" if APPEND_EXTRAS else "(eklenmedi)"))
+            print(" -", e, ("(appended)" if APPEND_EXTRAS else "(not appended)"))
 
+    print(f"\nDone. Rows written: {row_count}, Columns written: {out_cols}")
+    # also print original counts
+    # count original rows quickly
+    orig_rows = 0
+    with inp.open("r", encoding=ENCODING, newline='') as f:
+        for _ in f:
+            orig_rows += 1
+    # subtract header line
+    orig_rows = max(0, orig_rows - 1)
+    print(f"Original rows (excluding header): {orig_rows}, Original columns: {len(original_header)}")
 
 if __name__ == '__main__':
-    main()
-
-
-
-
-
-###########################################################################################################
-
-
-
-
-
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-fix_date_like_columns.py
-
-- Reads CSV (sep=';') with dtype=str to avoid pandas auto-conversion.
-- Target columns listed in COLUMNS_TO_FIX are cleaned of tokens like:
-    "6.Haz", "5.Şub", "3.Eyl", "Mar.40", "AÄŸu.40", "Nis.35", "11.Mar", etc.
-- Uses normalization + mojibake attempt + month-token mapping (Turkish + English).
-- Replaces values in-place, standardizes decimal separator to dot, attempts to cast to float.
-- Prints summary + sample conversions; writes OUTPUT_CSV.
-"""
-
-from pathlib import Path
-import pandas as pd
-import re
-import unicodedata
-
-# --------- CONFIG ----------
-INPUT_CSV = "CAR_DATA_FINAL_5.csv"   # input file (sep=';')
-OUTPUT_CSV = "CAR_DATA_FINAL_5.csv"
-SEP = ";"
-ENC = "utf-8-sig"
-
-# columns to fix (change to your exact column names if different)
-COLUMNS_TO_FIX = [
-    "PERFORMANS - 0-100 Km Hizlanma",
-    "EKONOMI - Ortalama Yakit Tuketimi (100 km)",
-    "EKONOMI - Sehir Ici Tuketim (100 km)",
-    "EKONOMI - Sehir Disi Tuketim (100 km)",
-]
-
-# ---------- month mapping ----------
-# includes english 3-letter and Turkish short forms
-_MONTH_MAP = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-    "oca": 1, "sub": 2, "şub": 2, "subat": 2, "mar": 3, "nis": 4, "may": 5,
-    "haz": 6, "tem": 7, "agu": 8, "ağu": 8, "eyl": 9, "eki": 10, "kas": 11, "ara": 12,
-    # some common variants
-    "oc":1, "ocak":1, "şub.":2
-}
-
-# normalize month keys (strip diacritics)
-def _norm_token(t: str) -> str:
-    if t is None:
-        return ""
-    t = str(t).strip()
-    # try to fix mojibake by re-decoding (common pattern: latin1-decoded utf-8 bytes)
-    try:
-        if "Ã" in t or "Ä" in t or "Â" in t:
-            t_try = t.encode("latin1").decode("utf-8")
-            # if decoding yields ascii letters or known month fragments, use it
-            if any(ch.isalpha() for ch in t_try):
-                t = t_try
-    except Exception:
-        pass
-    # normalize unicode, remove combining marks
-    t = unicodedata.normalize("NFKD", t)
-    t = "".join(ch for ch in t if not unicodedata.combining(ch))
-    t = t.lower()
-    # replace turkish special chars to ascii equivalents (already removed combining marks above)
-    t = t.replace("ğ", "g").replace("ç", "c").replace("ş", "s").replace("ı", "i").replace("ö", "o").replace("ü", "u")
-    # keep only letters
-    t = re.sub(r'[^a-z]', '', t)
-    return t
-
-# quick lookup helper
-_MONTH_MAP_NORMALIZED = { _norm_token(k): v for k, v in _MONTH_MAP.items() }
-
-def month_token_to_num(tok: str):
-    if not tok:
-        return None
-    key = _norm_token(tok)
-    if key in _MONTH_MAP_NORMALIZED:
-        return _MONTH_MAP_NORMALIZED[key]
-    # try prefixes
-    for L in (4, 3, 2):
-        if key[:L] in _MONTH_MAP_NORMALIZED:
-            return _MONTH_MAP_NORMALIZED[key[:L]]
-    return None
-
-# ---------- normalizers ----------
-_RE_DAY_MONTH = re.compile(r'^\s*(\d{1,2})[.\-/\s]+([A-Za-zÇĞİŞÜÖçğışüöÃÄÂ]+)\s*$', re.UNICODE)
-_RE_MONTH_NUM = re.compile(r'^\s*([A-Za-zÇĞİŞÜÖçğışüöÃÄÂ]+)[.\-/\s]+([0-9]+(?:[.,][0-9]+)?)\s*$', re.UNICODE)
-_RE_NUMERIC = re.compile(r'^\s*[-+]?\d+(?:[.,]\d+)?\s*$')
-
-def normalize_text(s: str) -> str:
-    if s is None:
-        return ""
-    s = str(s)
-    s = s.replace("\ufeff", "")
-    s = s.replace("\u200b", "")
-    s = s.strip()
-    # normalize weird dot-like separators to '.'
-    s = re.sub(r'[·•·⋅•・]', '.', s)
-    # normalize dashes
-    s = re.sub(r'[–—−]', '-', s)
-    # normalize unicode
-    s = unicodedata.normalize("NFKC", s)
-    return s
-
-def convert_token_to_numeric_string(val: str):
-    """
-    Return standardized numeric string or original value if not convertible.
-    Examples:
-      "6.Haz" -> "6.6"
-      "5.Şub" -> "5.2"
-      "Mar.40" -> "3.40"
-      "AÄŸu.40" -> "8.40" (via mojibake fix)
-      "10.0" -> "10.0" (keeps)
-    """
-    if val is None:
-        return val
-    s = normalize_text(val)
-    if s == "":
-        return s
-    # already numeric-ish -> replace comma by dot
-    if _RE_NUMERIC.match(s):
-        return s.replace(",", ".")
-    # day.monthname -> day.monthnum (e.g. 11.Mar -> 11.3)
-    m = _RE_DAY_MONTH.match(s)
-    if m:
-        day_tok, mon_tok = m.group(1), m.group(2)
-        monnum = month_token_to_num(mon_tok)
-        if monnum:
-            return f"{int(day_tok)}.{monnum}"
-    # monthname.number -> monthnum.number (Mar.40 -> 3.40)
-    m2 = _RE_MONTH_NUM.match(s)
-    if m2:
-        mon_tok, num_tok = m2.group(1), m2.group(2)
-        monnum = month_token_to_num(mon_tok)
-        if monnum:
-            # standardize numeric part to use dot
-            num_tok = num_tok.replace(",", ".")
-            return f"{monnum}.{num_tok}"
-    # fallback: split on separators, try to find month token anywhere
-    parts = re.split(r'[.\-/\s]+', s)
-    for i, p in enumerate(parts):
-        mn = month_token_to_num(p)
-        if mn:
-            # if month first and second numeric -> mn.num
-            if i == 0 and len(parts) > 1 and re.match(r'^\d+(?:[.,]\d+)?$', parts[1]):
-                return f"{mn}.{parts[1].replace(',', '.')}"
-            # if month second and first numeric -> day.mn
-            if i == 1 and re.match(r'^\d+$', parts[0]):
-                return f"{int(parts[0])}.{mn}"
-    # else return original (no change)
-    return val
-
-# ---------- main apply ----------
-def main():
-    p = Path(INPUT_CSV)
-    if not p.exists():
-        raise FileNotFoundError(f"Input CSV not found: {INPUT_CSV}")
-    df = pd.read_csv(p, sep=SEP, dtype=str, encoding=ENC)
-    print(f"Read CSV: rows={len(df)}, cols={len(df.columns)}")
-
-    total_replacements = 0
-    per_col = {}
-    examples = {}
-
-    for col in COLUMNS_TO_FIX:
-        if col not in df.columns:
-            print(f"Warning: column not found -> {col!r}; skipping.")
-            continue
-        ser = df[col].astype(str).fillna("")
-        new_vals = []
-        col_count = 0
-        col_examples = []
-        for orig in ser.tolist():
-            fixed = convert_token_to_numeric_string(orig)
-            # if fixed differs and both not empty equal
-            if (isinstance(orig, str) and orig.strip() != "") and (fixed != orig):
-                col_count += 1
-                if len(col_examples) < 8:
-                    col_examples.append((orig, fixed))
-            new_vals.append(fixed)
-        # assign back (strings)
-        df[col] = new_vals
-        total_replacements += col_count
-        per_col[col] = col_count
-        examples[col] = col_examples
-
-        # try cast to numeric (float) in-place if many conversions happened or numeric look majority
-        # We'll attempt to convert column values to numeric and keep original if dtype doesn't change useful.
-        coerced = pd.to_numeric(df[col].str.replace(",", "."), errors="coerce")
-        num_non_na = coerced.notna().sum()
-        # if there are more than zero numeric entries, replace with numbers where possible
-        if num_non_na > 0:
-            df[col] = coerced
-
-    # summary
-    print("\nTotal replacements:", total_replacements)
-    for c, cnt in per_col.items():
-        print(f"  {c}: {cnt}")
-        if examples[c]:
-            print("    examples:")
-            for a, b in examples[c]:
-                print(f"      {a!r}  ->  {b!r}")
-
-    # write output
-    outp = Path(OUTPUT_CSV)
-    df.to_csv(outp, sep=SEP, index=False, encoding=ENC)
-    print(f"\nWrote: {outp}  (rows={len(df)}, cols={len(df.columns)})")
-    print("Done")
-
-if __name__ == "__main__":
     main()

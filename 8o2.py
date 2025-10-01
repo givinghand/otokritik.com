@@ -253,8 +253,8 @@ import pandas as pd
 from pathlib import Path
 
 # ---------- CONFIG ----------
-INPUT_CSV = "CAR_DATA_FINAL.csv"          # change if needed
-OUTPUT_CSV = "CAR_DATA_FINAL.csv"
+INPUT_CSV = "CAR_DATA_FINAL_3.csv"          # change if needed
+OUTPUT_CSV = "CAR_DATA_FINAL_3.csv"
 SEP = ";"
 ENC = "utf-8-sig"
 COLUMN_NAME = "TEMEL OZELLIKLER - Model Yillari"

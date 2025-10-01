@@ -208,13 +208,18 @@ def compute_performance_score(df):
 def compute_ic_hacim_score(df):
     scores = []
     for _, group in df.groupby(GROUP_COLS):
+        # 1) Scale each dimension separately
         gen = scale_50_100(pd.to_numeric(group.get("AGIRLIK & OLCULER - Genislik"), errors="coerce")).fillna(50.0)
         uz  = scale_50_100(pd.to_numeric(group.get("AGIRLIK & OLCULER - Uzunluk"), errors="coerce")).fillna(50.0)
         yuk = scale_50_100(pd.to_numeric(group.get("AGIRLIK & OLCULER - Yukseklik"), errors="coerce")).fillna(50.0)
 
-        comp = (gen * IC_HACIM_WEIGHTS["genislik"] +
-                uz  * IC_HACIM_WEIGHTS["uzunluk"] +
-                yuk * IC_HACIM_WEIGHTS["yukseklik"])
+        # 2) Apply weights separately
+        gen_score = gen * IC_HACIM_WEIGHTS["genislik"]
+        uz_score  = uz  * IC_HACIM_WEIGHTS["uzunluk"]
+        yuk_score = yuk * IC_HACIM_WEIGHTS["yukseklik"]
+
+        # 3) Average (sum/3)
+        comp = (gen_score + uz_score + yuk_score) / 3.0
 
         scores.append(pd.Series(comp.values, index=group.index))
 
