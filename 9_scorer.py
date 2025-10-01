@@ -10,23 +10,23 @@ from pandas.api.types import is_string_dtype
 # ===============================
 # Sabitler ve Ağırlıklar
 # ===============================
-INPUT_CSV  = "Book1.csv"
+INPUT_CSV  = "CAR_DATA_FINAL.csv"
 OUTPUT_CSV = "CAR_DATA_SCORED.csv"
 
 BASE_MAINT = 100.0
-HP_COEFF   = 0.2
-CYL_COEFF  = 0.6
-CC_COEFF   = 0.2
+HP_COEFF   = 0.4
+CYL_COEFF  = 0.3
+CC_COEFF   = 0.3
 
 FUEL_FACTORS = {
     "dizel": 1.2,
-    "benzin": 1.0,
-    "benzin+lpg": 1.05,
+    "benzin": 1,
+    "benzin+lpg": 1.1,
     "elektrik": 0.8,
 }
 
 TRANS_FACTORS = {
-    "otomatik": 1.25,
+    "otomatik": 1.2,
     "manuel": 1.0,
     "redükt": 0.0,
     "redukt": 0.0,
@@ -35,8 +35,8 @@ TRANS_FACTORS = {
 SECURITY_WEIGHTS = {  # toplam 1.0
     "airbag": 0.30,
     "ncap": 0.50,
-    "weight": 0.1,
-    "height": 0.1,
+    "weight": 0.10,
+    "height": 0.10,
 }
 
 PERFORMANCE_WEIGHTS = {  # 5 parametre eşit
@@ -54,11 +54,11 @@ IC_HACIM_WEIGHTS = {  # 3 parametre eşit
 }
 
 KONFOR_WEIGHTS = {  # kullanıcı girişi
-    "ic": 0.30,
-    "agirlik": 0.30,
-    "taban": 0.10,
-    "kesit": 0.10,
-    "jant": 0.20,
+    "ic": 0.25,
+    "agirlik": 0.35,
+    "taban": 0.075,
+    "kesit": 0.075,
+    "jant": 0.25,
 }
 
 NEW_COLUMNS = [
@@ -289,11 +289,10 @@ def compute_eko_score(df, maint_score):
         jant_s  = scale_50_100(jant, invert=True).fillna(50.0)
         maint_s = maint_score.loc[group.index].fillna(50.0)
 
-        comp = (cons_s * 0.20 +
-                mtv_s  * 0.15 +
-                jant_s * 0.10 +
+        comp = (cons_s  * 0.20 +
+                mtv_s   * 0.15 +
+                jant_s  * 0.10 +
                 maint_s * 0.55)
-
 
         had_any_raw = (pd.to_numeric(consumption, errors="coerce").notna() |
                        pd.to_numeric(mtv, errors="coerce").notna() |
