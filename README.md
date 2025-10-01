@@ -1,1 +1,0 @@
-# otokritik.com

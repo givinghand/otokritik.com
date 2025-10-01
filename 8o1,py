@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+clean_title_and_move_model_years.py
+
+- Reads a semicolon-separated CSV (default INPUT_CSV)
+- Removes leading year (e.g. "2014 ") from BASLIK values (only at start)
+- Moves/creates "TEMEL OZELLIKLER - Model Yillari" column to be right after
+  "TEMEL OZELLIKLER - Donanim Paketi"
+- Writes result to OUTPUT_CSV and prints stats
+"""
+
+import re
+from pathlib import Path
+import pandas as pd
+
+# ---------------- Config ----------------
+INPUT_CSV = "CAR_DATA_FINAL_1.csv"         # change as needed
+OUTPUT_CSV = "CAR_DATA_FINAL_2.csv"
+SEP = ";"
+ENC = "utf-8-sig"
+
+# Exactly the column names expected (case-sensitive). The script is tolerant:
+# if a column is missing it will try to find a close match (case-insensitive contains).
+BASLIK_COL = "BASLIK"
+DONANIM_COL = "TEMEL OZELLIKLER - Donanim Paketi"
+NEW_MODEL_YEARS_COL = "TEMEL OZELLIKLER - Model Yillari"
+
+# Regex to remove leading year like "2014", "1999" optionally followed by separator/spaces
+LEADING_YEAR_RE = re.compile(r'^\s*(?:19|20)\d{2}[\s\-–—:_]*', flags=re.UNICODE)
+
+# ---------------- Helpers ----------------
+def find_column_insensitive(columns, target):
+    """Try to find an exact match otherwise a case-insensitive contains match."""
+    t = str(target).strip().lower()
+    for c in columns:
+        if str(c).strip() == target:
+            return c
+    for c in columns:
+        if str(c).strip().lower() == t:
+            return c
+    for c in columns:
+        if t in str(c).lower():
+            return c
+    return None
+
+# ---------------- Main ----------------
+def main():
+    p = Path(INPUT_CSV)
+    if not p.exists():
+        raise FileNotFoundError(f"Input CSV not found: {INPUT_CSV}")
+
+    # Read CSV as strings to avoid type coercion issues, preserve empty cells as empty strings
+    df = pd.read_csv(p, sep=SEP, encoding=ENC, dtype=str, keep_default_na=False)
+
+    original_rows = len(df)
+    print(f"Original rows: {original_rows}")
+
+    cols = list(df.columns)
+
+    # find actual column names (tolerant)
+    baslik_col_actual = find_column_insensitive(cols, BASLIK_COL)
+    donanim_col_actual = find_column_insensitive(cols, DONANIM_COL)
+    model_years_col_actual = find_column_insensitive(cols, NEW_MODEL_YEARS_COL)
+
+    # If BASLIK not found, error out (can't perform requested op)
+    if baslik_col_actual is None:
+        raise KeyError(f"Could not find column for '{BASLIK_COL}'. Available columns: {cols}")
+
+    # Clean BASLIK: remove leading year pattern only if present
+    orig_titles = df[baslik_col_actual].fillna("").astype(str)
+    cleaned = orig_titles.str.replace(LEADING_YEAR_RE, "", regex=True)
+    df[baslik_col_actual] = cleaned
+
+    # count how many changed
+    changed_mask = (orig_titles != cleaned)
+    changed_count = changed_mask.sum()
+    print(f"Removed leading year from {changed_count} rows in column '{baslik_col_actual}'")
+
+    # Ensure Model Yillari column exists: if not create it empty
+    if model_years_col_actual is None:
+        # create empty column (we will insert it later)
+        df[NEW_MODEL_YEARS_COL] = ""
+        model_years_col_actual = NEW_MODEL_YEARS_COL
+    else:
+        # normalize name: we will ensure the final column is named exactly NEW_MODEL_YEARS_COL
+        if model_years_col_actual != NEW_MODEL_YEARS_COL:
+            df = df.rename(columns={model_years_col_actual: NEW_MODEL_YEARS_COL})
+            model_years_col_actual = NEW_MODEL_YEARS_COL
+
+    # Now move NEW_MODEL_YEARS_COL to be right after DONANIM_COL
+    if donanim_col_actual is None:
+        # can't find donanim column; append model years at the end
+        print(f"Warning: could not find '{DONANIM_COL}' column; appending '{NEW_MODEL_YEARS_COL}' to the end.")
+        # ensure column is present (already handled)
+        final_cols = list(df.columns)
+    else:
+        # get current columns, remove model-years if present, then insert after donanim index
+        current_cols = [c for c in df.columns if c != NEW_MODEL_YEARS_COL]
+        try:
+            insert_at = current_cols.index(donanim_col_actual) + 1
+        except ValueError:
+            insert_at = len(current_cols)
+        # insert model years
+        current_cols.insert(insert_at, NEW_MODEL_YEARS_COL)
+        final_cols = current_cols
+
+    # Reorder DataFrame
+    df = df.loc[:, final_cols]
+
+    # Save
+    df.to_csv(OUTPUT_CSV, sep=SEP, index=False, encoding=ENC)
+
+    print(f"Saved updated CSV to: {OUTPUT_CSV}")
+    print(f"Done. Rows: {len(df)} (changed titles: {changed_count})")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
