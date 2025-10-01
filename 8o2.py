@@ -31,7 +31,7 @@ import re
 
 # ------------- config -------------
 INPUT_CSV = "CAR_DATA_FINAL_2.csv"
-OUTPUT_CSV = "CAR_DATA_FINAL.csv"
+OUTPUT_CSV = "CAR_DATA_FINAL_3.csv"
 SEP = ";"
 ENC = "utf-8-sig"
 
