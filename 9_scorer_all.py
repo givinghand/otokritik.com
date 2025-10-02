@@ -69,10 +69,7 @@ def int_round_series(s: pd.Series) -> pd.Series:
 ####################################
 
 def compute_maintenance_score(df: pd.DataFrame) -> pd.Series:
-    """
-    Estimates a raw maintenance cost and converts it to a score (higher = better/cheaper).
-    The formula inverts the cost so that lower costs yield scores closer to 100.
-    """
+   
     def parse_fuel_type(s):
         if not isinstance(s, str): return "other"
         s_low = s.lower()
@@ -118,10 +115,7 @@ def compute_maintenance_score(df: pd.DataFrame) -> pd.Series:
 ####################################
 
 def compute_performance_score(df: pd.DataFrame) -> pd.Series:
-    """
-    Calculates performance score using a fixed formula. Higher values for hp, torque,
-    and speed increase the score, while higher acceleration time and weight decrease it.
-    """
+   
     hiz    = safe_numeric_series(df, "PERFORMANS - Azami Hiz")
     tork   = safe_numeric_series(df, "PERFORMANS - Azami Tork")
     hp     = safe_numeric_series(df, "PERFORMANS - Beygir Gucu")
