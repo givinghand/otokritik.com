@@ -7,7 +7,7 @@ Pure-formula scorer without dataset scaling.
 - The formulas are tuned to produce results generally in the 20-100 range.
 - No min/max scaling; each row is calculated independently.
 - All final scores are rounded to integers.
-- Sub-scores: Performance, Ic_Hacim, Konfor, Guvenlik, Eko, Maintenance.
+- Sub-scores: performans, Ic_Hacim, Konfor, Guvenlik, Eko, bakim.
 """
 
 import pandas as pd
@@ -27,7 +27,7 @@ OUTPUT_CSV = "CAR_DATA_FINAL_4_SC.csv"
 
 # Weights are used conceptually to tune formula coefficients
 SECURITY_WEIGHTS = {"airbag": 0.30, "ncap": 0.50, "weight": 0.10, "height": 0.10}
-PERFORMANCE_WEIGHTS = {"hiz": 0.2, "tork": 0.2, "hp": 0.2, "accel": 0.2, "weight": 0.2}
+performans_WEIGHTS = {"hiz": 0.2, "tork": 0.2, "hp": 0.2, "accel": 0.2, "weight": 0.2}
 IC_HACIM_WEIGHTS = {"genislik": 1/3, "uzunluk": 1/3, "yukseklik": 1/3}
 KONFOR_WEIGHTS = {"ic": 0.25, "agirlik": 0.35, "taban": 0.075, "kesit": 0.075, "jant": 0.25}
 
@@ -65,10 +65,10 @@ def int_round_series(s: pd.Series) -> pd.Series:
 # ----------------------------
 
 ####################################
-# ✅ MAINTANENCE SCCORE ✅
+# ✅ bakim SCORE ✅
 ####################################
 
-def compute_maintenance_score(df: pd.DataFrame) -> pd.Series:
+def compute_bakim_score(df: pd.DataFrame) -> pd.Series:
    
     def parse_fuel_type(s):
         if not isinstance(s, str): return "other"
@@ -89,113 +89,108 @@ def compute_maintenance_score(df: pd.DataFrame) -> pd.Series:
     FUEL_FACTORS = {"dizel": 1, "benzin": 0.75, "benzin+lpg": 0.9, "elektrik": 0.55}
     TRANS_FACTORS = {"otomatik": 1, "manuel": 0.7, "redükt": 0.0, "redukt": 0.0}  
 
-    # Vectorized extraction of factors
     trans_factor = df.get("SANZIMAN & CEKIS SISTEMI - Sanziman Turu", pd.Series([""]*len(df))).fillna("").apply(get_trans_factor)
     fuel_factor = df.get("TEMEL OZELLIKLER - Yakit Turu", pd.Series([""]*len(df))).fillna("").apply(parse_fuel_type).map(FUEL_FACTORS).fillna(1.0)
     hp  = safe_numeric_series(df, "PERFORMANS - Beygir Gucu")
     cyl = safe_numeric_series(df, "MOTOR (Icten Yanmali) - Silindir Adedi")
     cc  = safe_numeric_series(df, "MOTOR (Icten Yanmali) - Silindir Hacmi")
 
-    # Normalize values before applying coefficients
-    hp_norm  = hp / 150
-    cyl_norm = cyl / 4
-    cc_norm  = cc / 1600
+    cost_raw =  ( (trans_factor * 15) + (fuel_factor * 15) + (hp / 150 * 15) + (cyl / 4 * 15) + (cc / 1600 * 15) )
 
-    # Calculate estimated raw cost
-    cost_raw =  ((trans_factor * 10) + (fuel_factor * 10) + (hp_norm * 10) + (cyl_norm * 10) + (cc_norm * 10))
+    score = 20 + (cost_raw)
 
-    # Convert cost to score: higher cost -> lower score.
-    # Tuned to produce scores in the target range for typical costs.
-    score = 120 - (cost_raw)
     return int_round_series(score)
 
 
 ####################################
-# ✅ PERFORMANCE SCCORE ✅
+# ✅ performans SCORE ✅
 ####################################
 
-def compute_performance_score(df: pd.DataFrame) -> pd.Series:
+def compute_performans_score(df: pd.DataFrame) -> pd.Series:
    
     hiz    = safe_numeric_series(df, "PERFORMANS - Azami Hiz")
     tork   = safe_numeric_series(df, "PERFORMANS - Azami Tork")
     hp     = safe_numeric_series(df, "PERFORMANS - Beygir Gucu")
-    accel  = safe_numeric_series(df, "PERFORMANS - 0 - 100 Km Hizlanma", default=15) # Default penalty
+    accel  = safe_numeric_series(df, "PERFORMANS - 0 - 100 Km Hizlanma")
     weight = safe_numeric_series(df, "AGIRLIK & OLCULER - Agirlik")
 
-    # Fixed formula with tuned coefficients to target the 20-100 range
-    score = (
-        20.0             # Base score
-        + (hp * 0.22)    # Each HP adds points
-        + (tork * 0.10)  # Each Nm of torque adds points
-        + (hiz * 0.15)   # Top speed contributes
-        - (accel * 4.0)  # Each second of acceleration subtracts points (penalty)
-        - (weight * 0.015) # Weight penalizes performance
-    )
+    perf_raw = ( (hp / 150 * 15) + (tork / 250 * 10) + (hiz / 175 * 10) - (accel / 10 * 15) - (weight / 1500 * 15) )
+
+    score = 20 + (perf_raw)
+
     return int_round_series(score)
 
+
+####################################
+# ✅ VOLUME SCORE ✅
+####################################
+
 def compute_ic_hacim_score(df: pd.DataFrame) -> pd.Series:
-    """
-    Calculates an interior volume proxy score from external dimensions.
-    Assumes dimensions are in mm.
-    """
+
     gen = safe_numeric_series(df, "AGIRLIK & OLCULER - Genislik")
     uz  = safe_numeric_series(df, "AGIRLIK & OLCULER - Uzunluk")
     yuk = safe_numeric_series(df, "AGIRLIK & OLCULER - Yukseklik")
 
-    # Calculate volume in cubic meters, assuming inputs are in mm
-    volume_m3 = (gen / 1000.0) * (uz / 1000.0) * (yuk / 1000.0)
+    volume_raw = (gen / 1750) * (uz / 4000) * (yuk / 1500)
 
-    # Convert volume to a score with a baseline and multiplier
-    score = 30.0 + (volume_m3 * 4.5)
+    score = 20 + (volume_raw * 50)
+
     return int_round_series(score)
+
+
+####################################
+# ✅ COMFORT SCORE ✅
+####################################
 
 def compute_konfor_score(df: pd.DataFrame, ic_score: pd.Series) -> pd.Series:
-    """
-    Calculates comfort score from interior space, weight, and tire properties.
-    A higher aspect ratio and weight are positive, while a larger rim diameter is negative.
-    """
-    agirlik = safe_numeric_series(df, "AGIRLIK & OLCULER - Agirlik")
-    kesit   = safe_numeric_series(df, "LASTIK & JANT - Kesit Orani")
-    jant    = safe_numeric_series(df, "LASTIK & JANT - Jant Capi")
 
-    # Convert nullable int ic_score to numeric for calculation
+    agirlik = safe_numeric_series(df, "AGIRLIK & OLCULER - Agirlik")
+    taban = safe_numeric_series(df, "LASTIK & JANT - Taban Genisligi")
+    kesit   = safe_numeric_series(df, "LASTIK & JANT - Kesit Orani" * 100)
+    jant    = safe_numeric_series(df, "LASTIK & JANT - Jant Capi")
     ic_numeric = pd.to_numeric(ic_score, errors='coerce').fillna(50)
 
-    # Formula tuned to reflect weights and produce target range scores
-    score = (
-        40.0              # Base comfort score
-        + (ic_numeric * 0.25)  # Larger space is more comfortable
-        + (agirlik * 0.01)     # Heavier cars often have a smoother ride
-        + (kesit * 0.5)        # Thicker tire sidewalls add comfort
-        - (jant * 2.0)         # Larger rims reduce comfort (less sidewall)
-    )
+    comf_raw = ( (ic_numeric / 4.5) + (agirlik / 1500 * 15) + (taban / 215 * 10) + (kesit / 55 * 10) + (jant / 16 * 20) )
+
+    score = 20 + (comf_raw)
+
     return int_round_series(score)
+
+
+####################################
+# ✅ SAFETY SCORE ✅
+####################################
+
 
 def compute_guvenlik_score(df: pd.DataFrame, ic_score: pd.Series) -> pd.Series:
-    """
-    Calculates safety score from airbags, NCAP rating, weight, and vehicle size.
-    All factors contribute positively to the score.
-    """
+
     airbag = safe_numeric_series(df, "YOLCU EMNIYETI - Hava Yastigi Adedi")
     ncap   = safe_numeric_series(df, "YOLCU EMNIYETI - NCAP/ANCAP Adedi")
-    weight = safe_numeric_series(df, "AGIRLIK & OLCULER - Agirlik")
+    agirlik = safe_numeric_series(df, "AGIRLIK & OLCULER - Agirlik")
     ic_numeric = pd.to_numeric(ic_score, errors='coerce').fillna(50)
 
-    # Formula tuned to emphasize NCAP and airbags, as per weights
-    score = (
-        5.0
-        + (ncap * 10.0)   # Each NCAP star is worth 10 points
-        + (airbag * 4.0)  # Each airbag is worth 4 points
-        + (weight * 0.01) # Heavier cars are generally safer in collisions
-        + (ic_numeric * 0.1) # Larger cars offer more crumple zone
-    )
+    safe_raw = ( (ncap / 1 * 15) + (airbag / 1 * 3) + (agirlik / 1500 * 15) + (ic_numeric / 4.5) )
+    
+    score = 20 + (safe_raw)
+
     return int_round_series(score)
 
+
+####################################
+# ✅ ECO SCORE ✅
+####################################
+
 def compute_eko_score(df: pd.DataFrame, maint_score: pd.Series) -> pd.Series:
-    """
-    Calculates economy score from consumption, tax (MTV), rim size, and maintenance.
-    The final score is a weighted average of score components.
-    """
+    
+    def parse_fuel_type(s):
+        if not isinstance(s, str): return "other"
+        s_low = s.lower()
+        if "elektrik" in s_low or "bev" in s_low: return "elektrik"
+        if "dizel" in s_low: return "dizel"
+        if "lpg" in s_low: return "benzin+lpg"
+        if "benzin" in s_low or "fosil" in s_low: return "benzin"
+        return "other"
+    
     comb = safe_numeric_series(df, "YAKIT TUKETIMI & EMISYON - Ortalama Y.Tuketimi (100 km)")
     elec = safe_numeric_series(df, "MOTOR (Elektrikli) - Ortalama Tuketim (Elk.)")
     mtv  = safe_numeric_series(df, "EKONOMI - MTV")
@@ -204,40 +199,30 @@ def compute_eko_score(df: pd.DataFrame, maint_score: pd.Series) -> pd.Series:
     fuel_col = df.get("TEMEL OZELLIKLER - Yakit Turu", pd.Series([""]*len(df))).fillna("").astype(str).apply(parse_fuel_type)
     is_electric = (fuel_col == "elektrik")
     consumption = comb.where(~is_electric, elec)
-    consumption = consumption.fillna(8.0) # Assume 8L/100km if missing
-
+    consumption = consumption.fillna(8.0)
     maint_numeric = pd.to_numeric(maint_score, errors='coerce').fillna(50)
 
-    # Create score components where higher is better (more economical)
-    cons_comp = 100 - (consumption * 6.0)
-    mtv_comp  = 100 - (mtv / 100.0)
-    jant_comp = 100 - (jant * 1.5)
+    score = ( (comb * 0.20) + (mtv * 0.15) + (jant * 0.15) + (maint_numeric * 0.50) )
 
-    # Weighted average of components
-    score = (
-        (cons_comp * 0.20) +
-        (mtv_comp * 0.15) +
-        (jant_comp * 0.15) +
-        (maint_numeric * 0.50)
-    )
     return int_round_series(score)
+
 
 # ----------------------------
 # Orchestration
 # ----------------------------
+
 def calculate_all_scores(df: pd.DataFrame) -> pd.DataFrame:
     """Orchestrates the calculation of all sub-scores."""
-    maintenance = compute_maintenance_score(df)
+    bakim = compute_bakim_score(df)
     ic_hacim = compute_ic_hacim_score(df)
-
-    performance = compute_performance_score(df)
+    performans = compute_performans_score(df)
     konfor = compute_konfor_score(df, ic_hacim)
     guvenlik = compute_guvenlik_score(df, ic_hacim)
-    eko = compute_eko_score(df, maintenance)
+    eko = compute_eko_score(df, bakim)
 
     df_out = df.copy()
-    df_out["Maintenance_Score"] = maintenance
-    df_out["Performance_Score"] = performance
+    df_out["bakim_Score"] = bakim
+    df_out["performans_Score"] = performans
     df_out["Ic_Hacim_Score"] = ic_hacim
     df_out["Konfor_Score"] = konfor
     df_out["Guvenlik_Score"] = guvenlik
@@ -245,9 +230,11 @@ def calculate_all_scores(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_out
 
+
 # ----------------------------
 # Main
 # ----------------------------
+
 def main():
     p = Path(INPUT_CSV)
     if not p.exists():
